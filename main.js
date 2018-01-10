@@ -52,15 +52,15 @@ async function get(url){
 (async () => {
     const version = 1.9
     const orgUnitId = 10011
-    const xhr = new 
+    const xhr = new XHR()
     // Get all catagories
-    var catagories = await get(`/d2l/api/lp/${version}/${orgUnitId}/groupcategories/`)
+    var catagories = await xhr.get(`/d2l/api/lp/${version}/${orgUnitId}/groupcategories/`)
     
     // catagories[].Name
     // catagories[].GroupCategoryId
     // catagories[].groups[] => groupIds
     
-    // 
+    await xhr.post(`/d2l/api/lp/${version}/${orgUnitId}/groupcategories/${groupCategoryId}/groups/${groupId}/enrollments/`) 
     
     console.log(catagories)
 })()
