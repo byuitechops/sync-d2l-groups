@@ -29,20 +29,27 @@ async function signStudentUp(signup) {
     const xhr = new XHR()
     
     // Get all catagories
-    var catagories = await xhr.get(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/`)
-    
-    if(catagories.length > 1){
-        signup.error = `${catagories[0].Name} was not the only one, there was also ${catagories.slice(1).reduce((str,c) => str+=c.Name+',','')}`
+    try{
+        var catagories = await xhr.get(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/`)
+    } catch(e){
+        throw new Error(`Failed to get the groups from the course`)
     }
-    // catagories[].Name
-    // catagories[].GroupCategoryId
-    // catagories[].groups[] => groupIds
+    // Make sure there is only one catagory
+    if(catagories.length > 1){
+        throw new Error(`${catagories[0].Name} was not the only one, there was also ${catagories.slice(1).reduce((str,c) => str+=c.Name+',','')}`)
+    }
+    // make sure there is only one group in that catagory
+    if(catagories[0].groups.length > 1){
+        throw new Error(`${catagories[0].groups[0]} was not the only group id there were also ${catagories[0].groups.slice(1).join(',')}`)
+    }
     
-    await xhr.post(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/${groupCategoryId}/groups/${groupId}/enrollments/`,{
-        UserId: userId
-    })
-    
-    console.log(catagories)
+    try{
+        await xhr.post(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/${catagories[0].GroupCategoryId}/groups/${catagories[0].groups[0]}/enrollments/`,{
+            UserId: signup.LDS_ACCOUNT_ID
+        })
+    } catch(e){
+        throw new Error(`Failed to add the student to the group`)
+    }
 }
 
 function parseFile(id){
@@ -74,42 +81,6 @@ function stopWaiting(){
     document.querySelectorAll('input').forEach(n => n.removeAttribute('disabled'))
 }
 
-async function requestAllCourses(){
-    var xhr = new XHR()
-    var bookmark = null
-    var hasMoreItems = true
-    var courses = []
-    startWaiting()
-    while(hasMoreItems){
-        var data = await xhr.get(`/d2l/api/lp/1.15/enrollments/myenrollments/?orgUnitTypeId=3${bookmark?'&Bookmark='+bookmark:''}`)
-        
-        bookmark = data.PagingInfo.Bookmark
-        hasMoreItems = data.PagingInfo.HasMoreItems
-        
-        data.Items.forEach(course => {
-            courses.push({
-                code: course.OrgUnit.Code,
-                id: course.OrgUnit.Id,
-                name: course.OrgUnit.Name,
-            })
-        })
-        console.log(bookmark)
-    }
-    stopWaiting()
-    return courses
-}
-
-async function getCourses(){
-    var courses = localStorage.courses
-    if(!courses){
-        courses = await requestAllCourses()
-        localStorage.courses = d3.csvFormat(courses)
-    } else {
-        courses = d3.csvParse(courses)
-    }
-    return courses
-}
-
 function createMap(courses){
     return courses.reduce((obj,course) => {
         obj[course.code] = course.id; 
@@ -118,26 +89,31 @@ function createMap(courses){
 }
 
 window.onload = async () => {
-    var courses = await getCourses()
-    var signups = await parseFile('csv')
+    var files = await Promise.all([parseFile('signups'),parseFile('courses')])
+    var signups = files[0]
+    var courses = files[1]
     
     startWaiting()
     var courseMap = createMap(courses)
     
-    for(var i = 0; i < signups.length; i++){
-        signups[0].error = undefined
+    for(var i = 0; i < 5; i++){
+        signups[i].error = undefined
         
-        if(!signups[0].REFERENCE){
-            signups[0].error = "Missing the 'REFERENCE' attribute that contains the coruse code"
-            continue;
+        if(!signups[i].REFERENCE){
+            signups[i].error = "Missing the 'REFERENCE' attribute that contains the coruse code"
         }
         if(!courseMap[signups[i].REFERENCE]){
-            signups[0].error = "The 'REFERENCE' course code, was not found in my list"
-            continue;
+            signups[i].error = `The 'REFERENCE' course code "${signups[i].REFERENCE}", was not found\n`
         }
-        signup.ou = courseMap[signups[i].REFERENCE]
-        await 
+        if(!signups[i].error){
+            signup.ou = courseMap[signups[i].REFERENCE]
+            await signStudentUp(signups[i]).catch(e => signups[i].error = e)
+        }
+        
+        if(signups[i].error){
+            document.getElementById('errors').innerHTML += `<p>${signups[i].FIRST_NAME} ${signups[i].LAST_NAME} in ${signups[i].D2L_COURSE_TITLE}: ${signups[i].error}</p>`
+        }
     }
-    console.log(students[0])
+    console.log(signups)
     stopWaiting()
 }
