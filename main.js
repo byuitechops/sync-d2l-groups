@@ -8,7 +8,7 @@ class XHR{
                     var data = JSON.parse(this.responseText)
                     resolve(data)
                 } else {
-                    reject(this.status)
+                    reject(this.status+": "+this.responseText)
                 }
               }
             }
@@ -28,30 +28,36 @@ async function signStudentUp(signup) {
     const version = 1.9
     const xhr = new XHR()
     
-    // Get all catagories
+    // Get all catagories: 
+    // https://pathway.brightspace.com/d2l/api/lp/1.9/31297/groupcategories/
     try{
         var catagories = await xhr.get(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/`)
     } catch(e){
-        throw new Error(`Failed to get the groups from the course`)
+        throw new Error(`Failed to get the Groups from the course`)
     }
-    // Make sure there is only one catagory
-    if(catagories.length > 1){
-        throw new Error(`${catagories[0].Name} was not the only one, there was also ${catagories.slice(1).reduce((str,c) => str+=c.Name+',','')}`)
+    // Make sure there is one and only one catagory named Virtual Gathering
+    var found = catagories.filter(c => c.Name === "Virtual Gathering")
+    if(found.length != 1){
+        throw new Error(`Could not find the "Virtual Gathering" catagory among ["${catagories.map(c => c.Name).join('","')}"]`)
     }
+    
+    var vgCatagory = found[0]
+    console.log(vgCatagory)
     // make sure there is only one group in that catagory
-    if(catagories[0].groups.length > 1){
-        throw new Error(`${catagories[0].groups[0]} was not the only group id there were also ${catagories[0].groups.slice(1).join(',')}`)
+    if(vgCatagory.Groups.length > 1){
+        throw new Error(`"${vgCatagory.Groups[0]}" was not the only group id there were also "${vgCatagory.Groups.slice(1).join('","')}"`)
     }
     
     try{
-        await xhr.post(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/${catagories[0].GroupCategoryId}/groups/${catagories[0].groups[0]}/enrollments/`,{
+        await xhr.post(`/d2l/api/lp/${version}/${signup.ou}/groupcategories/${vgCatagory.GroupCategoryId}/Groups/${vgCatagory.Groups[0]}/enrollments/`,{
             UserId: signup.LDS_ACCOUNT_ID
         })
     } catch(e){
-        throw new Error(`Failed to add the student to the group`)
+        throw new Error(`Failed to add the student to the group ${e}`)
     }
 }
 
+// Takes the input id and returns the parsed csv (array of objects)
 function parseFile(id){
     return new Promise((resolve,reject) => {
         var input = document.getElementById(id)
@@ -72,15 +78,20 @@ function parseFile(id){
 }
 
 function startWaiting(){
+    // Show loading bar
     document.getElementById('loading').removeAttribute('hidden')
+    // Disable all inputs just to be safe 
     document.querySelectorAll('input').forEach(n => n.setAttribute('disabled',true))
 }
 
 function stopWaiting(){
+    // Hide loading bar
     document.getElementById('loading').setAttribute('hidden',true)
+    // reable inputs
     document.querySelectorAll('input').forEach(n => n.removeAttribute('disabled'))
 }
 
+// turns the array of objects into a huge object with the course ids as the key
 function createMap(courses){
     return courses.reduce((obj,course) => {
         obj[course.code] = course.id; 
@@ -88,7 +99,22 @@ function createMap(courses){
     },{})
 }
 
+function createDownloadLink(data,fileName){ 
+    var a = document.createElement("a")
+    document.body.appendChild(a)
+    a.innerHTML = fileName
+    
+    var csv = d3.csvFormat(data)
+    var blob = new Blob([csv],{type:"octet/stream"})
+    var url = window.URL.createObjectURL(blob)
+    
+    a.href = url
+    a.download = fileName
+}
+
 window.onload = async () => {
+    // waiting to start unto both of the files are uploaded
+    // this should probably be changed to being fired when a button is clicked instead
     var files = await Promise.all([parseFile('signups'),parseFile('courses')])
     var signups = files[0]
     var courses = files[1]
@@ -96,24 +122,25 @@ window.onload = async () => {
     startWaiting()
     var courseMap = createMap(courses)
     
-    for(var i = 0; i < 5; i++){
-        signups[i].error = undefined
+    for(var i = 0; i < signups.length; i++){
+        var signup = signups[i]
+        signup.error = undefined
         
-        if(!signups[i].REFERENCE){
-            signups[i].error = "Missing the 'REFERENCE' attribute that contains the coruse code"
+        if(!signup.REFERENCE){
+            signup.error = "Missing the 'REFERENCE' attribute that contains the coruse code"
         }
-        if(!courseMap[signups[i].REFERENCE]){
-            signups[i].error = `The 'REFERENCE' course code "${signups[i].REFERENCE}", was not found\n`
+        if(!courseMap[signup.REFERENCE]){
+            signup.error = `The 'REFERENCE' course code "${signup.REFERENCE}", was not found\n`
         }
-        if(!signups[i].error){
-            signup.ou = courseMap[signups[i].REFERENCE]
-            await signStudentUp(signups[i]).catch(e => signups[i].error = e)
+        if(!signup.error){
+            signup.ou = courseMap[signup.REFERENCE]
+            await signStudentUp(signup).catch(e => signup.error = e)
         }
         
-        if(signups[i].error){
-            document.getElementById('errors').innerHTML += `<p>${signups[i].FIRST_NAME} ${signups[i].LAST_NAME} in ${signups[i].D2L_COURSE_TITLE}: ${signups[i].error}</p>`
+        if(signup.error){
+            document.getElementById('errors').innerHTML += `<p>${signup.FIRST_NAME} ${signup.LAST_NAME} in ${signup.D2L_COURSE_TITLE}: ${signup.error}</p>`
         }
     }
-    console.log(signups)
+    createDownloadLink(signups,'Signups w/ Errors.csv')
     stopWaiting()
 }
