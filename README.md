@@ -3,3 +3,6 @@
 - Add csv file containing list of classes and thier corresponding ous
 - Program uses d2l's api to run through list and add each student to the first group in the *Virtual Gathering* catagory
 - A report csv is created to download
+
+## **!!Doesn't Work!!**
+Always gets a permissions error, enrolling permissions might be needed to use this api
